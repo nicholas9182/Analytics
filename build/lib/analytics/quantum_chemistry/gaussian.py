@@ -64,9 +64,10 @@ class GaussianParser:
     def atoms(self) -> list:
         return self._atoms
 
-    def get_bonds(self):
+    def get_bonds_from_log(self):
         """
-        function to extract the bond data from the gaussian log file
+        function to extract the bond data from the gaussian log file. Use with caution - it doesnt always seem to get
+        the bond data right
         :return:
         """
         if self._opt is False:
@@ -91,23 +92,63 @@ class GaussianParser:
                     'length': [float(r.split()[3]) for r in bond_lines]
                     })
                 .assign(
-                    atom_1=lambda x: [self._atoms[i-1] for i in x['atom_id_1']],
-                    atom_2=lambda x: [self._atoms[i-1] for i in x['atom_id_2']]
+                    element_1=lambda x: [self._atoms[i-1] for i in x['atom_id_1']],
+                    element_2=lambda x: [self._atoms[i-1] for i in x['atom_id_2']]
                     )
                 )
 
         return data
 
-    def get_coordinates(self, heavy_atoms: bool = False) -> pd.DataFrame:
+    def get_bonds_from_coordinates(self, cutoff: float = 2, heavy_atoms: bool = False, pre_optimisation: bool = False):
         """
-        function to get the coordinates from the log file
-        :param heavy_atoms:
+        function to get bond data from the coordinates, using a cut-off distance
+        :param cutoff: The cutoff for calculating the bond lengths
+        :param heavy_atoms: just get the bonds involving heavy atoms
+        :param pre_optimisation: get the coordinated before the optimisation has begun?
         :return:
         """
-        start_line = len(self._lines) - (self
-                                         ._lines[::-1]
-                                         .index([k for k in self._lines if 'Standard orientation:' in k][0]) - 4
-                                         )
+        coordinates = self.get_coordinates(heavy_atoms=heavy_atoms, pre_optimisation=pre_optimisation)
+
+        cross = (coordinates
+                 .merge(coordinates, how='cross', suffixes=('_1', '_2'))
+                 .assign(dx=lambda x: x['x_2'] - x['x_1'])
+                 .assign(dy=lambda x: x['y_2'] - x['y_1'])
+                 .assign(dz=lambda x: x['z_2'] - x['z_1'])
+                 .assign(length=lambda x: (x['dx'].pow(2) + x['dy'].pow(2) + x['dz'].pow(2)).pow(0.5))
+                 .query('length < @cutoff')
+                 .query('length > 0')
+                 .filter(items=['atom_id_1', 'atom_id_2', 'length'])
+                 .reset_index(drop=True)
+                 .round(4)
+                 )
+
+        cross[['atom_id_1', 'atom_id_2']] = (np.sort(cross[['atom_id_1', 'atom_id_2']].to_numpy(), axis=1))
+
+        data = (cross
+                .groupby(['atom_id_1', 'atom_id_2'])
+                .agg(length=('length', 'first'))
+                .reset_index()
+                .assign(element_1=lambda x: [self._atoms[i-1] for i in x['atom_id_1']])
+                .assign(element_2=lambda x: [self._atoms[i-1] for i in x['atom_id_2']])
+                )
+
+        return data
+
+    def get_coordinates(self, heavy_atoms: bool = False, pre_optimisation: bool = False) -> pd.DataFrame:
+        """
+        function to get the coordinates from the log file
+        :param heavy_atoms: return just the heavy atoms?
+        :param pre_optimisation: get the coordinated before the optimisation has begun?
+        :return:
+        """
+        if pre_optimisation is False:
+            start_line = len(self._lines) - (self
+                                             ._lines[::-1]
+                                             .index([k for k in self._lines if 'Standard orientation:' in k][0]) - 4
+                                             )
+        else:
+            start_line = self._lines.index([k for k in self._lines if 'Standard orientation:' in k][0]) + 5
+        
         end_line = start_line + self._atomcount
 
         data = (pd.DataFrame({

@@ -13,13 +13,34 @@ class TestGaussianParser(unittest.TestCase):
     pedot_log = GaussianParser("../test_trajectories/pedot_raman/step1.log")
     bbl_log = GaussianParser("../test_trajectories/bbl/step3.log")
 
-    def test_get_bonds(self):
-        result = self.bbl_log.get_bonds()
+    def test_get_bonds_from_log(self):
+        result = self.bbl_log.get_bonds_from_log()
         self.assertTrue(type(result))
         self.assertTrue(result.iloc[0, 0] == 1)
         self.assertTrue(result.iloc[10, 2] == 1.3935)
         self.assertTrue(result.iloc[30, 3] == "C")
         self.assertTrue(result.iloc[50, 1] == 41)
+
+    def test_get_bonds_from_coordinates(self):
+        result = self.bbl_log.get_bonds_from_coordinates()
+        self.assertTrue(type(result))
+        self.assertTrue(result.iloc[0, 0] == 1)
+        self.assertTrue(result.iloc[10, 2] == 1.3935)
+        self.assertTrue(result.iloc[30, 3] == "C")
+        self.assertTrue(result.iloc[50, 1] == 41)
+
+    def test_get_bonds_from_coordinates_pre_opt(self):
+        result = self.bbl_log.get_bonds_from_coordinates(pre_optimisation=True)
+        self.assertTrue(type(result))
+        self.assertTrue(result.iloc[0, 0] == 1)
+        self.assertTrue(result.iloc[10, 2] == 1.3935)
+        self.assertTrue(result.iloc[30, 3] == "C")
+        self.assertTrue(result.iloc[50, 1] == 41)
+
+    def test_two_bond_methods(self):
+        result1 = self.bbl_log.get_bonds_from_log().sort_values(["atom_id_1", "atom_id_2"])
+        result2 = self.bbl_log.get_bonds_from_coordinates().sort_values(["atom_id_1", "atom_id_2"])
+        pd.testing.assert_frame_equal(result1.round(3), result2.round(3))
 
     def test_charge_pedot(self):
         self.assertTrue(self.pedot_log.charge == 0)
@@ -188,6 +209,12 @@ class TestGaussianParser(unittest.TestCase):
                                                        0.013091, 0.031796, 0.051678, 0.047337, -0.022861,
                                                        0.049976, 0.355428, -0.364014, 0.062057, 1.437312,
                                                        -1.445597, -0.096827, 0.069261])
+
+    def test_get_coordinates_pedot_pre_eq(self):
+        coordinates = self.pedot_log.get_coordinates(pre_optimisation=True).round(3)
+        self.assertTrue(coordinates['x'].to_list()[0] == -2.98)
+        self.assertTrue(coordinates['x'].to_list()[1] == -2.00)
+        self.assertTrue(coordinates['x'].to_list()[2] == -0.632)
 
     def test_get_coordinates_pedot_heavies(self):
         coordinates = self.pedot_log.get_coordinates(heavy_atoms=True)

@@ -29,7 +29,7 @@ class GaussianParser:
             self._charge = None
             self._multiplicity = None
 
-        if len([e for e in self._lines if 'SCF Done' in e]) > 0:
+        if self._complete is True:
             self._energy = float([e for e in self._lines if 'SCF Done' in e][-1].split()[4]) * 2625.5
             self._unrestricted = True if [e for e in self._lines if 'SCF Done' in e][-1].split()[2][2] == "U" else False
             self._mull_start = self._lines.index([k for k in self._lines if 'Mulliken charges' in k][0]) + 2
