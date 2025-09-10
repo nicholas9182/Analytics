@@ -70,6 +70,35 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
         
         return data
     
+    def set_ref(self, ref: str, ocp_data: pd.DataFrame = None) -> None:
+        """
+        Set the reference potential for the data.
+        Adjust the potential column based on the reference electrode.
+        
+        :param ref: The target reference electrode ('RHE', 'SHE', 'Ag/AgCl').
+        :param ocp_data: DataFrame containing OCV measurements, used to calculate RHE_shift for RHE.
+        """
+        # References
+        ref_offset = {'RHE': None,        # To be calculated w/ocp_data (varies on pH)
+                      'SHE': 0.0,         # No offset for SHE
+                      'Ag/AgCl': 0.197}  # Typical Ag/AgCl offset 
+
+        # Calculate offset for RHE
+        if ref == 'RHE':
+            if ocp_data is None:
+                raise ValueError("OCV data is required when setting ref to RHE")
+            
+            RHE_shift = (ocp_data
+                        .iloc[-10:] 
+                        .assign(RHEshift=lambda x: x['potential'].mean())  
+                        .iloc[0]  
+                        ['RHEshift'])  
+
+            ref_offset['RHE'] = RHE_shift
+
+        # Adjust potential based on chosen reference
+        self._data['potential'] = self._data['potential'] + ref_offset[ref]
+
     def _find_current_roots(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Function to find the time and voltage points where the current passes through 0
@@ -219,6 +248,45 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
 
         return cv
     
+    @classmethod
+    def nyquist(cls, path: str = None, format: str = None, data: pd.DataFrame = None, **kwargs):
+        """
+        Function to process Nyquist data and calculate electrolyte resistance.
+        """
+
+        valid_formats = ['aftermath', 'biologic']
+        if format not in valid_formats:
+            raise ValueError(f"Invalid format specified. Choose from {valid_formats}.")
+        
+        if path is None and data is not None:
+            data = data
+        elif path is not None and data is None:
+            if format == 'aftermath':
+                data = pd.read_table(
+                    path, 
+                    delimiter=',', 
+                    names=['segment', 'real_impedence', 'imaginary_impedence'], 
+                    header=0, 
+                    dtype=float
+                )
+            elif format == 'biologic':
+                data = pd.read_table(
+                    path, 
+                    delim_whitespace=True, 
+                    names=['frequency', 'real_impedence', 'imaginary_impedence', 'magnitude_impedence', 'phase'], 
+                    header=0, 
+                    dtype=float
+                )
+
+        electrolyte_resistance = (data
+                                  .apply(lambda df: df[df['imaginary_impedence'] == 
+                                                       df.query('imaginary_impedence > 0')['imaginary_impedence'].min()])
+                                  .rename(columns={'real_impedence': 'electrolyte_resistance'})
+                                  )
+
+        return electrolyte_resistance
+
+
     def drop_cycles(self, drop: list[int] | int = None, keep: list[int] | int = None) -> pd.DataFrame:
         """
         Function to edit which cycles are being considered
