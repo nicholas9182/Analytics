@@ -10,30 +10,77 @@ import mimetypes
 from plotly import graph_objects as go
 from copy import copy
 from datetime import datetime as dt
-
+from copy import deepcopy
 
 class TestBiologic1(unittest.TestCase):
 
     def setUp(self):
         """
-        Reading in a BBL CV
+       Reading in a BBL CV.
         """
         self.na = Cation('Na+')
         self.cl = Anion('Cl-')
         self.water = Solvent('H2O')
 
-        self.electrolyte = Electrolyte(cation=self.na, 
-                                       anion=self.cl, 
-                                       solvent=self.water, 
-                                       pH=7, 
-                                       temperature=298, 
-                                       concentrations={self.na: 1, self.cl: 1})
+        self.electrolyte = Electrolyte(
+            cation=self.na, 
+            anion=self.cl, 
+            solvent=self.water, 
+            pH=7, 
+            temperature=298, 
+            concentrations={self.na: 1, self.cl: 1}
+        )
 
-        self.cv = CyclicVoltammogram.from_biologic(path = 'test_trajectories/cyclic_voltammetry/biologic1.txt', 
-                                                   electrolyte = self.electrolyte, 
-                                                   metadata = {'scan_rate': 5, 'instrument': 'Biologic'}
-                                                   )
-        
+        self.cv = CyclicVoltammogram.from_biologic(
+            potential_reference='Ag/AgCl',
+            path='test_trajectories/cyclic_voltammetry/biologic1.txt', 
+            electrolyte=self.electrolyte, 
+            metadata={'scan_rate': 5, 'instrument': 'Biologic'}
+        )
+
+        self.cv_she = deepcopy(self.cv).set_potential_reference('she')
+        self.cv_rhe = deepcopy(self.cv).set_potential_reference('rhe', open_circuit_potential=1)
+        self.cv_she_agagcl = deepcopy(self.cv_she).set_potential_reference('agagcl')
+        self.cv_agagcl_rhe = deepcopy(self.cv).set_potential_reference('rhe', open_circuit_potential=1)
+        self.cv_rhe_agagcl = deepcopy(self.cv_rhe).set_potential_reference('agagcl', open_circuit_potential=1)
+        self.cv_rhe_she = deepcopy(self.cv_rhe).set_potential_reference('she', open_circuit_potential=1)
+
+
+    def test_potential_reference_conversion(self):
+        """
+        Test potential reference conversions.
+        """
+
+        # Ag/AgCl → SHE
+        original_potential = self.cv.data['potential'].copy()
+        shifted_potential = self.cv_she.data['potential']
+        expected_shift = original_potential + 0.197 
+        pd.testing.assert_series_equal(shifted_potential.round(5), expected_shift.round(5), check_names=False)
+
+        # SHE → Ag/AgCl
+        original_potential = self.cv_she.data['potential'].copy()
+        shifted_potential = self.cv_she_agagcl.data['potential']
+        expected_shift = original_potential - 0.197
+        pd.testing.assert_series_equal(shifted_potential.round(5), expected_shift.round(5), check_names=False)
+
+        # Ag/AgCl → RHE
+        original_potential = self.cv.data['potential'].copy()
+        shifted_potential = self.cv_agagcl_rhe.data['potential']
+        expected_shift = original_potential + 1
+        pd.testing.assert_series_equal(shifted_potential.round(5), expected_shift.round(5), check_names=False)
+
+        # RHE → Ag/AgCl
+        original_potential = self.cv_rhe.data['potential'].copy()
+        shifted_potential = self.cv_rhe_agagcl.data['potential']
+        expected_shift = original_potential - 1 
+        pd.testing.assert_series_equal(shifted_potential.round(5), expected_shift.round(5), check_names=False)
+
+        # RHE → SHE
+        original_potential = self.cv_rhe.data['potential'].copy()
+        shifted_potential = self.cv_rhe_she.data['potential']
+        expected_shift = original_potential + 1 + 0.197
+        pd.testing.assert_series_equal(shifted_potential.round(5), expected_shift.round(5), check_names=False)
+
     def test_show_plots(self):
         """ Test the show_current_potential, show_current_time and show_potential_time methods """
         # self.cv.show_current_potential()
@@ -60,6 +107,10 @@ class TestBiologic1(unittest.TestCase):
         self.assertTrue(type(self.cv._object_creation_time) == dt)
         self.assertTrue(type(self.cv.object_creation_time) == str)
 
+        self.assertEqual(self.cv._potential_reference, 'agagcl')
+        self.assertEqual(self.cv.potential_reference, 'Ag/AgCl')
+
+        
     def test_drop_cycles(self):
         """ Test the drop_cycles method """
         data = copy(self.cv).drop_cycles(drop=[1]).data
@@ -375,6 +426,8 @@ class TestAftermath1(unittest.TestCase):
         Reading in a BBL CV
         """
         self.cv = CyclicVoltammogram.from_aftermath(path = 'test_trajectories/cyclic_voltammetry/aftermath1.csv', scan_rate=5)
+
+        self.cv_she = copy(self.cv).set_potential_reference('she')
 
     def test_show_plots(self):
         """ Test the show_current_potential, show_current_time and show_potential_time methods """

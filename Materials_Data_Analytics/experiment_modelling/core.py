@@ -7,7 +7,7 @@ from scipy.signal import find_peaks
 import plotly.express as px
 from datetime import datetime as dt
 
-class Measurement():
+class Measurement:
     """
     A general measurement class
     Main contributors:
@@ -29,7 +29,16 @@ class Measurement():
     
     @property
     def data(self) -> pd.DataFrame:
-        return self._data
+        """
+        Returns the processed CA data along with metadata.
+        """
+        data = self._data.copy()
+        metadata = self.metadata
+
+        for k in metadata.keys():
+            data[k] = self.metadata[k]
+
+        return data
     
     @metadata.setter
     def metadata(self, value: dict):
@@ -476,13 +485,86 @@ class ElectrochemicalMeasurement(Measurement):
     Nicholas Siemons
     Contributors:
     """
-    def __init__(self, electrolyte: Electrolyte = None, metadata: dict = None) -> None:
+    def __init__(self, 
+                 potential_reference: str,
+                 electrolyte: Electrolyte = None,
+                 metadata: dict = None) -> None:
+        
         super().__init__(metadata=metadata)
+
         self._electrolyte = electrolyte
+        self._check_potential_reference(potential_reference)
+
+    def _check_potential_reference(self, value: str):
+
+        value = value.lower().replace('/', '')
+
+        allowed_references = ['agagcl', 'she', 'rhe']
+
+        if value in allowed_references:
+            self._potential_reference = value
+        else:
+            raise ValueError(f'allowed references are {allowed_references}')
 
     @property
     def electrolyte(self) -> Electrolyte:
         return self._electrolyte
+
+    @property
+    def potential_reference(self) -> str:
+        """
+        convert stored potential reference str to standard display titles 
+        """
+        outputs = {
+            'rhe': 'RHE',
+            'she': 'SHE',
+            'agagcl': 'Ag/AgCl'
+        }
+
+        return outputs[self._potential_reference]
+
+    def set_potential_reference(self, 
+                                reference: str, 
+                                open_circuit_potential: float = None
+                                ):
+        """
+        Function to change between reference potentials
+        
+        :param potential_reference: str, reference to change to 
+        :param reference: str, the current reference
+        :param open_circuit_potential: float, the OCV measured between rhe electrode and agagcl reference
+        """
+        if open_circuit_potential is None and (self._potential_reference == 'rhe' or reference == 'rhe'):
+            raise ValueError("open_circuit_potential cannot be None when converting to/from RHE")
+    
+        reference = reference.lower().replace('/', '')
+        valid_references = {'rhe', 'she', 'agagcl'}
+
+        data = self._data.copy()
+
+        if reference not in valid_references:
+            raise ValueError(f'Please enter one of {valid_references}')
+
+        if self._potential_reference == 'agagcl' and reference == 'she':
+            data['potential'] += 0.197
+        elif self._potential_reference == 'agagcl' and reference == 'rhe':
+            data['potential'] += open_circuit_potential
+        elif self._potential_reference == 'she' and reference == 'rhe':
+            data['potential'] -= open_circuit_potential + 0.197
+        elif self._potential_reference == 'she' and reference == 'agagcl':
+            data['potential'] -= 0.197
+        elif self._potential_reference == 'rhe' and reference == 'agagcl':
+            data['potential'] -= open_circuit_potential
+        elif self._potential_reference == 'rhe' and reference == 'she':
+            data['potential'] += open_circuit_potential + 0.197
+        else: 
+            raise ValueError(f'Chaning potential reference unsuccessful')
+
+        self._potential_reference = reference 
+        self._data = data
+
+        return self
+
     
     @staticmethod
     def _find_voltage_peaks(data):

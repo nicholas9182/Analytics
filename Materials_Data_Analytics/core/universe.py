@@ -1,5 +1,4 @@
 from __future__ import annotations
-import MDAnalysis as mda
 from Materials_Data_Analytics.metadynamics.free_energy import FreeEnergySpace
 
 
@@ -12,6 +11,7 @@ class Universe:
         The current idea is that we have our own universe, but a lot of the internal working will use the mda universe, so that is stored as a
         separate attribute. Also stored will be a list of free energy shapes. These will have different temperatures, or there may just be one at
         a given temperature. The only thing that can change between them is the temperature as they must exist for the same universe.
+
         :param tpr_file:
         :param xtc_file:
         :param fes:
@@ -25,8 +25,3 @@ class Universe:
             self._fes = fes
         else:
             raise ValueError("fes must be a FreeEnergyShape, or list of FreeEnergyShapes")
-
-        if xtc_file and tpr_file:
-            self._mdu = mda.Universe(tpr_file, xtc_file)
-        else:
-            self._mdu = None

@@ -20,6 +20,7 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
     Contributors:
     """
     def __init__(self,  
+                 potential_reference: str,
                  potential: Union[list, pd.Series, np.array] = None,
                  current: Union[list, pd.Series, np.array] = None,
                  time: Union[list, pd.Series, np.array] = None,
@@ -27,7 +28,7 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
                  metadata: dict = None
                  ) -> None:
         
-        super().__init__(electrolyte, metadata=metadata)
+        super().__init__(potential_reference=potential_reference, electrolyte=electrolyte, metadata=metadata)
 
         self._data = pd.DataFrame()
 
@@ -40,35 +41,63 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
         self._max_cycle = self._data['cycle'].max()
         self._max_segment = self._data['segment'].max()
 
-    def _wrangle_data(self, data, first_index = 50, remove_last_n = 50) -> pd.DataFrame:
-        """
-        Function to wrangle the data
-        :param data: pd.DataFrame with columns potential, current, cycle, time
-        """
+    def _wrangle_data(self, data, first_index=50, remove_last_n=50) -> pd.DataFrame:
         last_index = data['current'].last_valid_index() - remove_last_n
+    
         data = (data
-                .query('index > @first_index')
-                .query('index < @last_index')
-                .dropna()
-                .reset_index(drop=True)
-                .sort_values(by=['time'])
-                .assign(time = lambda x: x['time'] - x['time'].min())
-                .groupby(['potential','time'], as_index=False)
-                .mean()
-                .sort_values('time')
-                .reset_index(drop=True)
-                )
-        
-        data = (data
-                .pipe(self._find_current_roots)
-                .pipe(self._find_voltage_peaks)
-                .pipe(self._add_endpoints)
-                .pipe(self._check_types)
-                .sort_values(by=['time', 'segment'])
-                .reset_index(drop=True)
-                )
-        
+            .query('index > @first_index')
+            .query('index < @last_index')
+            .dropna()
+            .reset_index(drop=True)
+            .sort_values(by=['time'])
+            .assign(time=lambda x: x['time'] - x['time'].min())
+            .groupby(['potential', 'time'], as_index=False)
+            .mean()
+            .sort_values('time')
+            .reset_index(drop=True)
+            )
+         # For one-cycle bipotentiostat experiments
+        if 'cycle' not in data.columns:
+            data['cycle'] = 1
+        if 'segment' not in data.columns:
+            data['segment'] = 1  
+        if data['segment'].nunique() > 1:
+            data = (data.pipe(self._add_endpoints)
+                    .sort_values(by=['time', 'segment'])
+                    .reset_index(drop=True))
         return data
+
+
+    # def _wrangle_data(self, data, first_index = 50, remove_last_n = 50) -> pd.DataFrame:
+    #     """
+    #     Function to wrangle the data
+    #     :param data: pd.DataFrame with columns potential, current, cycle, time
+    #     """
+    #     last_index = data['current'].last_valid_index() - remove_last_n
+    #     data = (data
+    #             .query('index > @first_index')
+    #             .query('index < @last_index')
+    #             .dropna()
+    #             .reset_index(drop=True)
+    #             .sort_values(by=['time'])
+    #             .assign(time = lambda x: x['time'] - x['time'].min())
+    #             .groupby(['potential','time'], as_index=False)
+    #             .mean()
+    #             .sort_values('time')
+    #             .reset_index(drop=True)
+    #             )
+        
+    #     data = (data
+    #             .pipe(self._find_current_roots)
+    #             .pipe(self._find_voltage_peaks)
+    #             .pipe(self._add_endpoints)
+    #             .pipe(self._check_types)
+    #             .sort_values(by=['time', 'segment'])
+    #             .reset_index(drop=True)
+    #             )
+        
+    #     return data
+    
     
     def _find_current_roots(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -130,24 +159,18 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
                 .assign(segment = lambda x: x['segment'].astype(int))
                 .assign(direction = lambda x: x['direction'].astype(str))
                 )
-
-    @property
-    def data(self) -> pd.DataFrame:
-        
-        data = self._data.copy()
-        metadata = self.metadata
-
-        for k in metadata.keys():
-            data[k] = self.metadata[k]
-
-        return data
     
     @property
     def steps_per_cycle(self) -> int:
         return self._data.query('segment == 0')['time'].count()
 
     @classmethod
-    def from_html_base64(cls, file_contents, source, scan_rate = None, **kwargs):
+    def from_html_base64(cls, 
+                         potential_reference: str,
+                         file_contents, 
+                         source, 
+                         scan_rate = None, 
+                         **kwargs):
         """
         Function to make a CyclicVoltammogram object from an html file
         """
@@ -157,17 +180,21 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
 
         if source == 'biologic':
             data = pd.read_table(file_data, sep='\t')
-            cv = cls.from_biologic(data=data, **kwargs)
+            cv = cls.from_biologic(potential_reference=potential_reference, data=data, **kwargs)
         elif source == 'aftermath':
             data = pd.read_table(file_data, sep=",")
-            cv = cls.from_aftermath(data=data, scan_rate=scan_rate, **kwargs)
+            cv = cls.from_aftermath(potential_reference=potential_reference, data=data, scan_rate=scan_rate, **kwargs)
         else:
             raise ValueError('The source must be either biologic or aftermath')
         
         return cv
 
     @classmethod
-    def from_biologic(cls, path: str = None, data: pd.DataFrame = None, **kwargs):
+    def from_biologic(cls, 
+                      potential_reference: str,  
+                      path: str = None, 
+                      data: pd.DataFrame = None, 
+                      **kwargs):
         """
         Function to make a CyclicVoltammogram object from a biologic file
         """
@@ -182,14 +209,24 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
                 .filter(['potential', 'current', 'time'])
                 )
 
-        cv = cls(potential=data['potential'], current=data['current'], time=data['time'], **kwargs)
-        
+        cv = cls(potential_reference=potential_reference,
+                 potential=data['potential'], 
+                 current=data['current'], 
+                 time=data['time'], 
+                 **kwargs)
+
         return cv
-    
+
     @classmethod
-    def from_aftermath(cls, path: str = None, scan_rate: float = None, data: pd.DataFrame = None, **kwargs):
+    def from_aftermath(cls, 
+                       potential_reference: str,  
+                       path: str = None, 
+                       scan_rate: float = None, 
+                       data: pd.DataFrame = None, 
+                       **kwargs):
         """
         Function to make a CyclicVoltammogram object from an AfterMath file
+
         :param path: str, path to the AfterMath file
         :param scan_rate: float, the scan rate of the cyclic voltammogram in mV/s
         :param data: pd.DataFrame, the data of the cyclic voltammogram
@@ -215,7 +252,11 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
         
         data.loc[0, 'time'] = 0
 
-        cv = cls(potential=data['potential'], current=data['current'], time=data['time'], **kwargs)
+        cv = cls(potential_reference=potential_reference, 
+                 potential=data['potential'], 
+                 current=data['current'], 
+                 time=data['time'], 
+                 **kwargs)
 
         return cv
     
@@ -243,7 +284,14 @@ class CyclicVoltammogram(ElectrochemicalMeasurement):
         """
         Function to plot the cyclic voltammogram
         """
-        data = self.data.assign(cycle_direction = lambda x: x['cycle'].astype('str') + ', ' + x['direction'])
+        # data = self.data.assign(cycle_direction = lambda x: x['cycle'].astype('str') + ', ' + x['direction'])
+        
+        data = self.data.copy()
+        # Only add 'cycle_direction' if 'direction' exists
+        if 'direction' in data.columns:
+            data = data.assign(cycle_direction = lambda x: x['cycle'].astype('str') + ', ' + x['direction'])
+        else:
+            data = data.assign(cycle_direction = lambda x: x['cycle'].astype('str'))  # Just use cycle
 
         figure = px.line(data, x='potential', y='current', color='cycle_direction', markers=True, 
                          labels={'potential': 'Potential [V]', 'current': 'Current [mA]'}, **kwargs)
